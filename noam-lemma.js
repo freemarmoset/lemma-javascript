@@ -1,1 +1,275 @@
-function MessageBuilder(e){this.lemma_id=e}function EventFilter(){this.callbacks={}}function MessageHandler(e){this.tcpReader=new TcpReader(function(t){var n=(new MessageParser).parse(t);"event"==n[0]&&e.handle(n[2],n[3])})}function EventSender(e,t){this.systemVersion="1.0",this.webSocket=e,this.builder=t}function Lemma(e,t,n){this.connected=!1,this.lemmaId=e,this.desiredRoom=t,"DEBUG"==n&&(this.debugMode=!0),this.messageBuilder=new MessageBuilder(this.lemmaId),this.eventFilter=new EventFilter,this.messageHandler=new MessageHandler(this.eventFilter)}MessageBuilder.prototype.event=function(e,t){var n=[];return n.push("event"),n.push(this.lemma_id),n.push(e),n.push(t),JSON.stringify(n)},MessageBuilder.prototype.register=function(e,t,n,s){var r=[];return r.push("register"),r.push(this.lemma_id),r.push(0),r.push(t),r.push(e),r.push(n),r.push(s),JSON.stringify(r)},MessageBuilder.prototype.marco=function(e){var t=[];return t.push("marco"),t.push(this.lemma_id),t.push(e),t.push("node.js"),t.push("1.1"),JSON.stringify(t)},"undefined"!=typeof module&&module.exports&&(module.exports=MessageBuilder),EventFilter.prototype.add=function(e,t){void 0===this.callbacks[e]&&(this.callbacks[e]=[]),this.callbacks[e].push(t)},EventFilter.prototype.handle=function(e,t){var n=this.callbacks[e];void 0!==n&&n.forEach(function(n){n(e,t)})},EventFilter.prototype.events=function(){return Object.keys(this.callbacks)},"undefined"!=typeof module&&module.exports&&(module.exports=EventFilter);var isNode=!1;if("undefined"!=typeof module&&module.exports){var TcpReader=require("./TcpReader"),MessageParser=require("./MessageParser");isNode=!0}MessageHandler.prototype.receive=function(e){this.tcpReader.read(e)},isNode&&(module.exports=MessageHandler),EventSender.prototype.sendEvent=function(e,t){this.sendMessage(this.builder.event(e,t))},EventSender.prototype.sendRegister=function(e,t){this.sendMessage(this.builder.register(e,t,"web",this.systemVersion))},EventSender.prototype.sendMessage=function(e){this.webSocket.send(this.zeroPad(e.length,6)+e)},EventSender.prototype.zeroPad=function(e,t){return new Array(t+1-e.toString().length).join("0")+e},"undefined"!=typeof module&&module.exports&&(module.exports=EventSender);var isNode=!1,debugMode=!1;if("undefined"!=typeof module&&module.exports){isNode=!0;var EventFilter=require("./EventFilter"),MessageBuilder=require("./MessageBuilder"),MessageHandler=require("./MessageHandler"),EventSender=require("./EventSender"),WebSocket=require("ws")}Lemma.prototype.debug=function(e){this.debugMode&&console.log(e)},Lemma.prototype.isConnected=function(){return!!this.connected},Lemma.prototype.begin=function(e,t){var n=this,s=new WebSocket("ws://"+e+":"+t.toString()+"/websocket");n.sender=new EventSender(s,this.messageBuilder),s.onmessage=function(e){n.messageHandler.receive(e.data)},s.onclose=function(){n.connected=!1,n.debug("socket closed"),n.sender=null,n.onDisconnectCallback&&n.onDisconnectCallback()},s.onopen=function(){n.debug("connected..."),n.sender.sendRegister([],n.eventFilter.events()),n.connected=!0},s.onerror=function(e){n.connected=!1,n.debug("Web socket Error"),n.debug(e),n.sender=null,n.onDisconnectCallback&&n.onDisconnectCallback()}},Lemma.prototype.hears=function(e,t){this.eventFilter.add(e,t)},Lemma.prototype.sendEvent=function(e,t){if(this.sender)try{this.sender.sendEvent(e,t)}catch(n){this.debug("Error trying to send: "+n),this.sender=null,this.onDisconnectCallback&&this.onDisconnectCallback()}else this.debug("You must 'begin' the lemma before sending a message")},isNode&&(module.exports=Lemma);
+//Copyright (c) 2014, IDEO 
+
+function MessageBuilder(lemma_id){
+  this.lemma_id = lemma_id;
+}
+
+MessageBuilder.prototype.event = function(name, value){
+  var output = [];
+  output.push("event");
+  output.push(this.lemma_id);
+  output.push(name);
+  output.push(value);
+  return JSON.stringify(output);
+};
+
+MessageBuilder.prototype.register = function(plays, hears, device_id, system_version){
+  var output = [];
+  output.push('register');
+  output.push(this.lemma_id);
+  output.push(0);
+  output.push(hears);
+  output.push(plays);
+  output.push(device_id);
+  output.push(system_version);
+  return JSON.stringify(output);
+};
+
+MessageBuilder.prototype.marco = function(desiredRoom){
+  var output = [];
+  output.push('marco');
+  output.push(this.lemma_id);
+  output.push(desiredRoom);
+  output.push('node.js');
+  output.push('1.1');
+  return JSON.stringify(output);
+};
+
+if(typeof module !== 'undefined' && module.exports){
+  module.exports = MessageBuilder;
+}
+;
+//Copyright (c) 2014, IDEO 
+
+function EventFilter() {
+  this.callbacks = {};
+}
+
+EventFilter.prototype.add = function(name, callback) {
+  if (this.callbacks[name] === undefined) {
+    this.callbacks[name] = [];
+  }
+  this.callbacks[name].push(callback);
+};
+
+EventFilter.prototype.handle = function(name, value) {
+  var callbacks = this.callbacks[name];
+  if (callbacks !== undefined) {
+    callbacks.forEach(function (callback) {
+      callback(name, value);
+    });
+  }
+};
+
+EventFilter.prototype.events = function() {
+  return Object.keys(this.callbacks);
+};
+
+if(typeof module !== 'undefined' && module.exports){
+  module.exports = EventFilter;
+}
+;
+//Copyright (c) 2014, IDEO 
+
+function TcpReader(callback) {
+  this.callback = callback;
+  this.buffer = "";
+}
+
+TcpReader.prototype.read = function(data) {
+  this.buffer = this.buffer.concat(data);
+  var size = this.payloadSize( this.buffer );
+  while ( size > 0 && this.buffer.length >= ( 6 + size ) ) {
+    this.consumeOne( size );
+    size = this.payloadSize( this.buffer );
+  }
+};
+
+TcpReader.prototype.payloadSize = function(buffer) {
+  if ( this.buffer.length >= 6 ){
+    return parseInt( buffer.slice( 0,6 ), 10 );
+  }
+  else {
+    return -1;
+  }
+};
+
+TcpReader.prototype.consumeOne = function(size) {
+  var messageStart = 6;
+  var messageEnd = 6 + size;
+  this.callback( this.buffer.slice( messageStart, messageEnd ) );
+  this.buffer = this.buffer.slice( messageEnd, this.buffer.length );
+};
+
+if(typeof module !== 'undefined' && module.exports){
+  module.exports = TcpReader;
+}
+;
+//Copyright (c) 2014, IDEO 
+
+function MessageParser() {
+}
+
+MessageParser.prototype.parse = function(message) {
+  try {
+    return JSON.parse(message);
+  }
+  catch(e) {
+    console.log("Error Parsing badly formed JSON: " + message);
+    console.log(e);
+    return [];
+  }
+};
+
+if(typeof module !== 'undefined' && module.exports){
+  module.exports = MessageParser;
+}
+;
+//Copyright (c) 2014, IDEO 
+
+
+
+
+var isNode = false;
+if(typeof module !== 'undefined' && module.exports){
+  var TcpReader = require('./TcpReader'),
+  MessageParser = require('./MessageParser');
+  isNode = true;
+}
+
+function MessageHandler(eventFilter) {
+  this.tcpReader = new TcpReader(function(message) {
+    var parsed = (new MessageParser()).parse(message);
+    if (parsed[0] == "event") {
+      eventFilter.handle(parsed[2], parsed[3]);
+    }
+  });
+}
+
+MessageHandler.prototype.receive = function(data) {
+  this.tcpReader.read(data);
+};
+
+if(isNode){
+  module.exports = MessageHandler;
+}
+;
+//Copyright (c) 2014, IDEO 
+
+function EventSender(webSocket, builder) {
+  this.systemVersion = "1.0";
+  this.webSocket = webSocket;
+  this.builder = builder;
+}
+
+EventSender.prototype.sendEvent = function(name, value){
+  this.sendMessage(this.builder.event(name, value));
+};
+
+EventSender.prototype.sendRegister = function(plays, hears) {
+  this.sendMessage(this.builder.register(plays, hears, "web", this.systemVersion));
+};
+
+EventSender.prototype.sendMessage = function(message) {
+  this.webSocket.send(this.zeroPad(message.length, 6) + message);
+};
+
+EventSender.prototype.zeroPad = function(number, width) {
+  return (new Array(width + 1 - number.toString().length)).join('0') + number;
+};
+
+if(typeof module !== 'undefined' && module.exports){
+  module.exports = EventSender;
+}
+;
+//Copyright (c) 2014, IDEO 
+
+
+
+
+
+
+var isNode = false;
+var debugMode = false;
+if(typeof module !== 'undefined' && module.exports){
+  isNode = true;
+  var EventFilter = require('./EventFilter'),
+  MessageBuilder = require('./MessageBuilder'),
+  MessageHandler = require('./MessageHandler'),
+  EventSender = require('./EventSender'),
+  WebSocket = require('ws');
+}
+
+function Lemma(lemmaId, desiredRoom, debug) {
+  this.connected = false;
+  this.lemmaId = lemmaId;
+  this.desiredRoom = desiredRoom;
+  if( debug == "DEBUG") this.debugMode = true;
+  this.messageBuilder = new MessageBuilder(this.lemmaId);
+  this.eventFilter = new EventFilter();
+  this.messageHandler = new MessageHandler(this.eventFilter);
+}
+
+Lemma.prototype.debug = function(str){ 
+  if(this.debugMode){
+    console.log(str); 
+  }
+};
+Lemma.prototype.isConnected = function(){ return !!this.connected; };
+
+Lemma.prototype.begin = function(host, port) {
+  var lemma = this;
+  var ws = new WebSocket("ws://" + host + ":" + port.toString() + "/websocket");
+  lemma.sender = new EventSender(ws, this.messageBuilder);
+
+  ws.onmessage = function(evt) { lemma.messageHandler.receive(evt.data); };
+  ws.onclose = function() {
+    lemma.connected = false;
+    lemma.debug("socket closed");
+    lemma.sender = null;
+    if(lemma.onDisconnectCallback) {
+      lemma.onDisconnectCallback();
+    }
+  };
+  ws.onopen = function() {
+    lemma.debug("connected...");
+    lemma.sender.sendRegister([], lemma.eventFilter.events());
+    lemma.connected = true;
+  };
+  ws.onerror = function(err) {
+    lemma.connected = false;
+    lemma.debug("Web socket Error");
+    lemma.debug(err);
+    lemma.sender = null;
+    if(lemma.onDisconnectCallback) {
+      lemma.onDisconnectCallback();
+    }
+  };
+};
+
+Lemma.prototype.hears = function(name, callback) {
+  this.eventFilter.add(name, callback);
+};
+
+Lemma.prototype.sendEvent = function(name, value) {
+  if (this.sender) {
+    try {
+      this.sender.sendEvent(name, value);
+    } catch (e) {
+      this.debug("Error trying to send: " + e);
+      this.sender = null;
+      if(this.onDisconnectCallback) {
+        this.onDisconnectCallback();
+      }
+    }
+  }
+  else {
+    this.debug("You must 'begin' the lemma before sending a message");
+  }
+};
+
+if(isNode){
+  module.exports = Lemma;
+}
+
+;
